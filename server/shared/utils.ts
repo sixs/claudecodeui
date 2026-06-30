@@ -273,9 +273,14 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
       }
     }
 
-    const resolvedWorkspaceRoot = normalizeProjectPath(await realpath(WORKSPACES_ROOT));
+    const allowAllRoots = (process.env.WORKSPACES_ROOT || '').trim() === '/';
+    const resolvedWorkspaceRoot = allowAllRoots
+      ? null
+      : normalizeProjectPath(await realpath(WORKSPACES_ROOT));
     if (
-      !resolvedPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
+      !allowAllRoots
+      && resolvedWorkspaceRoot
+      && !resolvedPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
       && resolvedPath !== resolvedWorkspaceRoot
     ) {
       return {
@@ -292,7 +297,9 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
         const resolvedSymlinkPath = path.resolve(path.dirname(absolutePath), symlinkTarget);
         const realSymlinkPath = await realpath(resolvedSymlinkPath);
         if (
-          !realSymlinkPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
+          !allowAllRoots
+          && resolvedWorkspaceRoot
+          && !realSymlinkPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
           && realSymlinkPath !== resolvedWorkspaceRoot
         ) {
           return {

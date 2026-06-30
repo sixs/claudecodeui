@@ -110,11 +110,13 @@ export default function SidebarProjectItem({
     onSaveProjectName(project.projectId);
   };
 
-  const selectAndToggleProject = () => {
-    if (selectedProject?.projectId !== project.projectId) {
-      onProjectSelect(project);
-    }
-
+  const toggleProjectRow = () => {
+    // Only expand/collapse — do NOT auto-select the project. Selecting would
+    // switch the right-side session detail away from the session the user is
+    // currently viewing. Sessions for the expanded project are loaded
+    // independently via getProjectSessions, so expanding without selecting
+    // still shows the project's session list. The user switches the
+    // right-side only by explicitly clicking a session.
     toggleProject();
   };
 
@@ -268,7 +270,7 @@ export default function SidebarProjectItem({
               !isSelected &&
               'bg-yellow-50/50 dark:bg-yellow-900/10 hover:bg-yellow-100/50 dark:hover:bg-yellow-900/20',
           )}
-          onClick={selectAndToggleProject}
+          onClick={toggleProjectRow}
         >
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <div

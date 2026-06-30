@@ -343,6 +343,29 @@ app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
 
         console.log('[API] Browse filesystem request for path:', dirPath);
         console.log('[API] WORKSPACES_ROOT is:', WORKSPACES_ROOT);
+
+        // Allow-all mode (WORKSPACES_ROOT === '/'): when browsing the virtual root
+        // on Windows, return a synthetic list of available drives so the user can
+        // navigate to C:/D:/E: etc. Without this, path.resolve('/') collapses to
+        // the current drive root and the user is stuck on one drive.
+        const isAllowAll = (process.env.WORKSPACES_ROOT || '').trim() === '/';
+        const isVirtualRootRequest = !dirPath || dirPath === '~' || dirPath === '/';
+        if (isAllowAll && process.platform === 'win32' && isVirtualRootRequest) {
+            const drives = [];
+            for (let code = 65; code <= 90; code += 1) {
+                const letter = String.fromCharCode(code);
+                const drivePath = `${letter}:\\`;
+                try {
+                    if (fs.existsSync(drivePath)) {
+                        drives.push({ path: drivePath, name: `${letter}:`, type: 'directory' });
+                    }
+                } catch {
+                    /* drive not accessible, skip */
+                }
+            }
+            return res.json({ path: '/', suggestions: drives });
+        }
+
         // Default to home directory if no path provided
         const defaultRoot = WORKSPACES_ROOT;
         let targetPath = dirPath ? expandWorkspacePath(dirPath) : defaultRoot;

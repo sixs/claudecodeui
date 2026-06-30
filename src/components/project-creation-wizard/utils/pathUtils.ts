@@ -24,8 +24,16 @@ export const getSuggestionRootPath = (inputPath: string): string => {
 
 // Handles root edge cases for Unix-like and Windows paths.
 export const getParentPath = (currentPath: string): string | null => {
-  if (currentPath === '~' || currentPath === '/' || WINDOWS_DRIVE_PATTERN.test(currentPath)) {
+  if (currentPath === '~' || currentPath === '/') {
     return null;
+  }
+
+  // Windows drive root (e.g. "E:\") — go up to the virtual "/" drive list
+  // when in allow-all workspaces mode. Reaching a drive root only happens
+  // when allow-all is on (validation blocks it otherwise), so returning "/"
+  // here is safe.
+  if (WINDOWS_DRIVE_PATTERN.test(currentPath)) {
+    return '/';
   }
 
   const lastSeparatorIndex = Math.max(currentPath.lastIndexOf('/'), currentPath.lastIndexOf('\\'));
