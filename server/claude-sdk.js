@@ -207,10 +207,16 @@ function mapCliOptionsToSDK(options = {}) {
 
   sdkOptions.disallowedTools = settings.disallowedTools || [];
 
-  sdkOptions.model = options.model || CLAUDE_FALLBACK_MODELS.DEFAULT;
+  // Only pass an explicit model when the user picked a specific one. The
+  // 'default' sentinel means "use whatever the SDK / settings.json resolves
+  // to". Passing it would override ~/.claude/settings.json `model` (e.g.
+  // glm-5.2 on a custom ANTHROPIC_BASE_URL) with the SDK's built-in default.
+  if (options.model && options.model !== 'default') {
+    sdkOptions.model = options.model;
+  }
 
   const resolvedEffort = resolveClaudeEffort(
-    sdkOptions.model,
+    sdkOptions.model || options.model,
     effort,
     options.effortModels || CLAUDE_FALLBACK_MODELS,
   );
