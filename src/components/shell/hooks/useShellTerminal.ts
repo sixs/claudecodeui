@@ -36,6 +36,11 @@ type UseShellTerminalResult = {
   disposeTerminal: () => void;
 };
 
+function isTerminalViewportAtBottom(terminal: Terminal): boolean {
+  const buffer = terminal.buffer.active;
+  return Math.abs(buffer.baseY - buffer.viewportY) <= 1;
+}
+
 export function useShellTerminal({
   terminalContainerRef,
   terminalRef,
@@ -205,7 +210,11 @@ export function useShellTerminal({
         return;
       }
 
+      const shouldKeepBottom = isTerminalViewportAtBottom(currentTerminal);
       currentFitAddon.fit();
+      if (shouldKeepBottom) {
+        currentTerminal.scrollToBottom();
+      }
       sendSocketMessage(wsRef.current, {
         type: 'resize',
         cols: currentTerminal.cols,
@@ -234,7 +243,11 @@ export function useShellTerminal({
           return;
         }
 
+        const shouldKeepBottom = isTerminalViewportAtBottom(currentTerminal);
         currentFitAddon.fit();
+        if (shouldKeepBottom) {
+          currentTerminal.scrollToBottom();
+        }
         sendSocketMessage(wsRef.current, {
           type: 'resize',
           cols: currentTerminal.cols,

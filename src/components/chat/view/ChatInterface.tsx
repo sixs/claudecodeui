@@ -5,7 +5,6 @@ import { ArrowDownIcon } from 'lucide-react';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
 import PermissionContext from '../../../contexts/PermissionContext';
-import { QuickSettingsPanel } from '../../quick-settings-panel';
 import type { ChatInterfaceProps, Provider  } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
@@ -20,6 +19,13 @@ import CommandResultModal from './subcomponents/CommandResultModal';
 function ChatInterface({
   selectedProject,
   selectedSession,
+  isActive = true,
+  sessionStore: providedSessionStore,
+  statusCheckSentAtRef: providedStatusCheckSentAtRef,
+  lastSeqRef: providedLastSeqRef,
+  streamTimerRef: providedStreamTimerRef,
+  accumulatedStreamRef: providedAccumulatedStreamRef,
+  streamProviderRef: providedStreamProviderRef,
   ws,
   sendMessage,
   onFileOpen,
@@ -41,24 +47,51 @@ function ChatInterface({
   const { subscribe } = useWebSocket();
   const { t } = useTranslation('chat');
 
-  const sessionStore = useSessionStore();
-  const streamTimerRef = useRef<number | null>(null);
-  const accumulatedStreamRef = useRef('');
+  const localSessionStore = useSessionStore();
+  const sessionStore = providedSessionStore ?? localSessionStore;
+  const localStreamTimerRef = useRef(new Map<string, number>());
+  const localAccumulatedStreamRef = useRef(new Map<string, string>());
+  const localStreamProviderRef = useRef(new Map<string, Provider>());
+  const streamTimerRef = providedStreamTimerRef ?? localStreamTimerRef;
+  const accumulatedStreamRef = providedAccumulatedStreamRef ?? localAccumulatedStreamRef;
+  const streamProviderRef = providedStreamProviderRef ?? localStreamProviderRef;
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
-  const statusCheckSentAtRef = useRef(new Map<string, number>());
+  const localStatusCheckSentAtRef = useRef(new Map<string, number>());
   // Highest live `seq` observed per session. Written by the realtime handler
   // on every sequenced frame, read whenever a `chat.subscribe` is sent so the
   // server replays only the events this client actually missed.
-  const lastSeqRef = useRef(new Map<string, number>());
+  const localLastSeqRef = useRef(new Map<string, number>());
+  const statusCheckSentAtRef = providedStatusCheckSentAtRef ?? localStatusCheckSentAtRef;
+  const lastSeqRef = providedLastSeqRef ?? localLastSeqRef;
 
-  const resetStreamingState = useCallback(() => {
-    if (streamTimerRef.current) {
-      clearTimeout(streamTimerRef.current);
-      streamTimerRef.current = null;
+  const resetStreamingState = useCallback((sessionId?: string | null) => {
+    if (sessionId === null) {
+      return;
     }
-    accumulatedStreamRef.current = '';
-  }, []);
+
+    const clearSession = (targetSessionId: string) => {
+      const timerId = streamTimerRef.current.get(targetSessionId);
+      if (timerId) {
+        clearTimeout(timerId);
+      }
+      streamTimerRef.current.delete(targetSessionId);
+      accumulatedStreamRef.current.delete(targetSessionId);
+      streamProviderRef.current.delete(targetSessionId);
+    };
+
+    if (sessionId) {
+      clearSession(sessionId);
+      return;
+    }
+
+    for (const timerId of streamTimerRef.current.values()) {
+      clearTimeout(timerId);
+    }
+    streamTimerRef.current.clear();
+    accumulatedStreamRef.current.clear();
+    streamProviderRef.current.clear();
+  }, [accumulatedStreamRef, streamProviderRef, streamTimerRef]);
 
   const {
     provider,
@@ -90,6 +123,7 @@ function ChatInterface({
   } = useChatProviderState({
     selectedSession,
     selectedProject,
+    isActive,
   });
 
   const {
@@ -134,6 +168,7 @@ function ChatInterface({
     statusCheckSentAtRef,
     lastSeqRef,
     sessionStore,
+    isActive,
   });
 
   // Brand-new conversation: the composer allocated a stable session id via
@@ -239,6 +274,7 @@ function ChatInterface({
 
   useChatRealtimeHandlers({
     subscribe,
+    isActive,
     provider,
     selectedSession,
     currentSessionId,
@@ -247,6 +283,7 @@ function ChatInterface({
     setPendingPermissionRequests,
     streamTimerRef,
     accumulatedStreamRef,
+    streamProviderRef,
     lastSeqRef,
     statusCheckSentAtRef,
     onSessionProcessing,
@@ -256,7 +293,7 @@ function ChatInterface({
   });
 
   useEffect(() => {
-    if (!canAbortSession) {
+    if (!isActive || !canAbortSession) {
       return;
     }
 
@@ -273,13 +310,14 @@ function ChatInterface({
     return () => {
       document.removeEventListener('keydown', handleGlobalEscape, { capture: true });
     };
-  }, [canAbortSession, handleAbortSession]);
+  }, [canAbortSession, handleAbortSession, isActive]);
 
   useEffect(() => {
+    const sessionIdForCleanup = selectedSession?.id || currentSessionId;
     return () => {
-      resetStreamingState();
+      resetStreamingState(sessionIdForCleanup);
     };
-  }, [resetStreamingState]);
+  }, [currentSessionId, resetStreamingState, selectedSession?.id]);
 
   const permissionContextValue = useMemo(() => ({
     pendingPermissionRequests,
@@ -450,8 +488,6 @@ function ChatInterface({
         />
         </div>
       </div>
-
-      <QuickSettingsPanel />
 
       <CommandResultModal
         payload={commandModalPayload}

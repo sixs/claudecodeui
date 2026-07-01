@@ -16,13 +16,14 @@ const INITIAL_VISIBLE_MESSAGES = 100;
 interface UseChatSessionStateArgs {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
+  isActive?: boolean;
   ws: WebSocket | null;
   sendMessage: (message: unknown) => void;
   externalMessageUpdate?: number;
   newSessionTrigger?: number;
   processingSessions?: SessionActivityMap;
   onSessionIdle?: MarkSessionIdle;
-  resetStreamingState: () => void;
+  resetStreamingState: (sessionId?: string | null) => void;
   /** When each session's `chat.subscribe` was last sent; guards stale idle acks. */
   statusCheckSentAtRef: MutableRefObject<Map<string, number>>;
   /** Highest live seq observed per session; sent as `lastSeq` on subscribe. */
@@ -93,6 +94,7 @@ function chatMessageToNormalized(
 export function useChatSessionState({
   selectedProject,
   selectedSession,
+  isActive = true,
   ws,
   sendMessage,
   externalMessageUpdate,
@@ -118,6 +120,7 @@ export function useChatSessionState({
   const [showLoadAllOverlay, setShowLoadAllOverlay] = useState(false);
   const [viewHiddenCount, setViewHiddenCount] = useState(0);
 
+  const currentSessionIdRef = useRef<string | null>(selectedSession?.id || null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const wasNearTopRef = useRef(false);
   const [searchTarget, setSearchTarget] = useState<{ timestamp?: string; uuid?: string; snippet?: string } | null>(null);
@@ -146,6 +149,10 @@ export function useChatSessionState({
   const createDiff = useMemo<DiffCalculator>(() => createCachedDiffCalculator(), []);
 
   useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() => {
     const trigger = newSessionTrigger ?? 0;
     if (trigger === previousNewSessionTriggerRef.current) {
       return;
@@ -168,7 +175,7 @@ export function useChatSessionState({
      * - No dependence on route/tab/session-object identity changes.
      * - No coupling to unrelated external update signals.
      */
-    resetStreamingState();
+    resetStreamingState(currentSessionId);
     setCurrentSessionId(null);
     setPendingUserMessage(null);
     messagesOffsetRef.current = 0;
@@ -199,7 +206,7 @@ export function useChatSessionState({
       clearTimeout(loadAllFinishedTimerRef.current);
       loadAllFinishedTimerRef.current = null;
     }
-  }, [newSessionTrigger, onSessionIdle, resetStreamingState]);
+  }, [currentSessionId, newSessionTrigger, onSessionIdle, resetStreamingState]);
 
   /* ---------------------------------------------------------------- */
   /*  Derive processing state for the viewed session                  */
@@ -226,12 +233,15 @@ export function useChatSessionState({
   const [pendingUserMessage, setPendingUserMessage] = useState<ChatMessage | null>(null);
   const flushedPendingUserMessageRef = useRef<ChatMessage | null>(null);
 
-  // Tell the store which session we're viewing so it only re-renders for this one
-  const prevActiveForStoreRef = useRef<string | null>(null);
-  if (activeSessionId !== prevActiveForStoreRef.current) {
-    prevActiveForStoreRef.current = activeSessionId;
+  // Tell the store which visible keep-alive pane owns updates so it only
+  // re-renders for the session the user is currently viewing.
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
     sessionStore.setActiveSession(activeSessionId);
-  }
+  }, [activeSessionId, isActive, sessionStore]);
 
   useEffect(() => {
     if (!pendingUserMessage) {
@@ -247,7 +257,7 @@ export function useChatSessionState({
       return;
     }
 
-    const prov = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
+    const prov = selectedSession?.__provider || (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
     const normalized = chatMessageToNormalized(pendingUserMessage, activeSessionId, prov);
     if (normalized) {
       sessionStore.appendRealtime(activeSessionId, normalized);
@@ -255,7 +265,7 @@ export function useChatSessionState({
 
     flushedPendingUserMessageRef.current = pendingUserMessage;
     setPendingUserMessage(null);
-  }, [activeSessionId, pendingUserMessage, sessionStore]);
+  }, [activeSessionId, pendingUserMessage, selectedSession?.__provider, sessionStore]);
 
   const storeMessages = activeSessionId ? sessionStore.getMessages(activeSessionId) : [];
 
@@ -286,12 +296,12 @@ export function useChatSessionState({
       setPendingUserMessage(msg);
       return;
     }
-    const prov = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
+    const prov = selectedSession?.__provider || (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
     const normalized = chatMessageToNormalized(msg, activeSessionId, prov);
     if (normalized) {
       sessionStore.appendRealtime(activeSessionId, normalized);
     }
-  }, [activeSessionId, sessionStore]);
+  }, [activeSessionId, selectedSession?.__provider, sessionStore]);
 
   const clearMessages = useCallback(() => {
     if (!activeSessionId) return;
@@ -478,11 +488,12 @@ export function useChatSessionState({
       // A freshly created session can be mid-run before the router has a
       // canonical selectedSession (the URL effect synthesizes one on the
       // next render). Keep the active view intact instead of wiping it.
-      if (currentSessionId && processingSessionsRef.current?.has(currentSessionId)) {
+      const previousSessionId = currentSessionIdRef.current;
+      if (previousSessionId && processingSessionsRef.current?.has(previousSessionId)) {
         return;
       }
 
-      resetStreamingState();
+      resetStreamingState(previousSessionId);
       setCurrentSessionId(null);
       messagesOffsetRef.current = 0;
       setHasMoreMessages(false);
@@ -496,7 +507,7 @@ export function useChatSessionState({
     const sessionKey = `${selectedSessionId}:${selectedProject.projectId}`;
 
     const subscribeToSelectedSession = () => {
-      if (!ws) {
+      if (!isActive || !ws) {
         return;
       }
 
@@ -516,9 +527,10 @@ export function useChatSessionState({
       return;
     }
 
-    const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSessionId;
+    const previousSessionId = currentSessionIdRef.current;
+    const sessionChanged = previousSessionId !== null && previousSessionId !== selectedSessionId;
     if (sessionChanged) {
-      resetStreamingState();
+      resetStreamingState(previousSessionId);
     }
 
     // Reset pagination/scroll state
@@ -568,6 +580,7 @@ export function useChatSessionState({
     });
   }, [
     resetStreamingState,
+    isActive,
     selectedProject,
     selectedSession?.id,
     sendMessage,

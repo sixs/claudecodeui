@@ -160,18 +160,24 @@ export default function Shell({
       return;
     }
 
-    const focusTerminal = () => {
-      terminalRef.current?.focus();
+    const focusAndScrollTerminal = () => {
+      const terminal = terminalRef.current;
+      if (!terminal) {
+        return;
+      }
+
+      terminal.focus();
+      terminal.scrollToBottom();
     };
 
-    const animationFrameId = window.requestAnimationFrame(focusTerminal);
-    const timeoutId = window.setTimeout(focusTerminal, 0);
+    const animationFrameId = window.requestAnimationFrame(focusAndScrollTerminal);
+    const timeoutId = window.setTimeout(focusAndScrollTerminal, 0);
 
     return () => {
       window.cancelAnimationFrame(animationFrameId);
       window.clearTimeout(timeoutId);
     };
-  }, [isActive, isConnected, isInitialized, terminalRef]);
+  }, [isActive, isConnected, isInitialized, selectedSession?.id, terminalRef]);
 
   const sendInput = useCallback(
     (data: string) => {
@@ -181,10 +187,6 @@ export default function Shell({
   );
 
   const sessionDisplayName = useMemo(() => getSessionDisplayName(selectedSession), [selectedSession]);
-  const sessionDisplayNameShort = useMemo(
-    () => (sessionDisplayName ? sessionDisplayName.slice(0, 30) : null),
-    [sessionDisplayName],
-  );
   const sessionDisplayNameLong = useMemo(
     () => (sessionDisplayName ? sessionDisplayName.slice(0, 50) : null),
     [sessionDisplayName],
@@ -271,29 +273,28 @@ export default function Shell({
 
   return (
     <div className="flex h-full w-full flex-col bg-gray-900">
-      <ShellHeader
-        isConnected={isConnected}
-        isInitialized={isInitialized}
-        isRestarting={isRestarting}
-        hasSession={Boolean(selectedSession)}
-        sessionDisplayNameShort={sessionDisplayNameShort}
-        onDisconnect={handleDisconnectShell}
-        onRestart={handleRestartShell}
-        statusNewSessionText={t('shell.status.newSession')}
-        statusInitializingText={t('shell.status.initializing')}
-        statusRestartingText={t('shell.status.restarting')}
-        disconnectLabel={t('shell.actions.disconnect')}
-        disconnectTitle={t('shell.actions.disconnectTitle')}
-        restartLabel={t('shell.actions.restart')}
-        restartTitle={t('shell.actions.restartTitle')}
-        disableRestart={isRestarting || !isInitialized}
-      />
-
       <div className="relative flex-1 overflow-hidden p-2">
         <div
           ref={terminalContainerRef}
           className="h-full w-full focus:outline-none"
           style={{ outline: 'none' }}
+        />
+
+        <ShellHeader
+          isConnected={isConnected}
+          isInitialized={isInitialized}
+          isRestarting={isRestarting}
+          hasSession={Boolean(selectedSession)}
+          onDisconnect={handleDisconnectShell}
+          onRestart={handleRestartShell}
+          statusNewSessionText={t('shell.status.newSession')}
+          statusInitializingText={t('shell.status.initializing')}
+          statusRestartingText={t('shell.status.restarting')}
+          disconnectLabel={t('shell.actions.disconnect')}
+          disconnectTitle={t('shell.actions.disconnectTitle')}
+          restartLabel={t('shell.actions.restart')}
+          restartTitle={t('shell.actions.restartTitle')}
+          disableRestart={isRestarting || !isInitialized}
         />
 
         {overlayMode && (

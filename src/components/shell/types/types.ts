@@ -4,6 +4,15 @@ import type { Terminal } from '@xterm/xterm';
 
 import type { Project, ProjectSession } from '../../../types/app';
 
+export type ShellToolsSettings = {
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  allowedCommands?: string[];
+  disallowedCommands?: string[];
+  skipPermissions?: boolean;
+  [key: string]: unknown;
+};
+
 export type ShellInitMessage = {
   type: 'init';
   projectPath: string;
@@ -15,6 +24,8 @@ export type ShellInitMessage = {
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
   forceRestart?: boolean;
+  permissionMode?: string;
+  toolsSettings?: ShellToolsSettings;
 };
 
 export type ShellResizeMessage = {

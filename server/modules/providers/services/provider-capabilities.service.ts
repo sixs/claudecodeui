@@ -44,7 +44,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   },
   cursor: {
     provider: 'cursor',
-    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    permissionModes: ['default', 'bypassPermissions'],
     defaultPermissionMode: 'default',
     supportsImages: false,
     supportsAbort: true,
@@ -64,7 +64,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   },
   gemini: {
     provider: 'gemini',
-    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    permissionModes: ['default', 'auto_edit', 'yolo', 'plan'],
     defaultPermissionMode: 'default',
     supportsImages: false,
     supportsAbort: true,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useTheme } from '../../../contexts/ThemeContext';
+import { AGENT_PERMISSION_SETTINGS_CHANGED_EVENT } from '../../../constants/appEvents';
 import { authenticatedFetch } from '../../../utils/api';
 import { setNotificationSoundEnabled } from '../../../utils/notificationSound';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
@@ -280,6 +281,8 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         permissionMode: geminiPermissionMode,
         lastUpdated: now,
       }));
+
+      window.dispatchEvent(new Event(AGENT_PERMISSION_SETTINGS_CHANGED_EVENT));
 
       const notificationResponse = await authenticatedFetch('/api/settings/notification-preferences', {
         method: 'PUT',

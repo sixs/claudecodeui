@@ -1,0 +1,1 @@
+export const AGENT_PERMISSION_SETTINGS_CHANGED_EVENT = 'agentPermissionSettingsChanged';

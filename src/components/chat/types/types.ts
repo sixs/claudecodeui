@@ -1,4 +1,7 @@
+import type { MutableRefObject } from 'react';
+
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
+import type { SessionStore } from '../../../stores/useSessionStore';
 import type {
   MarkSessionIdle,
   MarkSessionProcessing,
@@ -7,7 +10,14 @@ import type {
 
 export type Provider = LLMProvider;
 
-export type PermissionMode = 'default' | 'acceptEdits' | 'auto' | 'bypassPermissions' | 'plan';
+export type PermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'auto'
+  | 'bypassPermissions'
+  | 'plan'
+  | 'auto_edit'
+  | 'yolo';
 
 export interface ChatImage {
   data: string;
@@ -116,6 +126,13 @@ export type SessionEstablishedContext = {
 export interface ChatInterfaceProps {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
+  isActive?: boolean;
+  sessionStore?: SessionStore;
+  statusCheckSentAtRef?: MutableRefObject<Map<string, number>>;
+  lastSeqRef?: MutableRefObject<Map<string, number>>;
+  streamTimerRef?: MutableRefObject<Map<string, number>>;
+  accumulatedStreamRef?: MutableRefObject<Map<string, string>>;
+  streamProviderRef?: MutableRefObject<Map<string, LLMProvider>>;
   ws: WebSocket | null;
   sendMessage: (message: unknown) => void;
   onFileOpen?: (filePath: string, diffInfo?: any) => void;

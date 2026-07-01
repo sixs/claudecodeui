@@ -32,6 +32,18 @@ function mapGeminiExitCodeToMessage(exitCode) {
     }
 }
 
+function normalizeGeminiPermissionMode(permissionMode) {
+    if (permissionMode === 'bypassPermissions') {
+        return 'yolo';
+    }
+
+    if (permissionMode === 'acceptEdits') {
+        return 'auto_edit';
+    }
+
+    return permissionMode;
+}
+
 const GEMINI_AUTH_ENV_KEYS = [
     'GEMINI_API_KEY',
     'GOOGLE_API_KEY',
@@ -121,6 +133,7 @@ async function buildGeminiProcessEnv() {
 
 async function spawnGemini(command, options = {}, ws) {
     const { sessionId, projectPath, cwd, toolsSettings, permissionMode, images, sessionSummary } = options;
+    const resolvedPermissionMode = normalizeGeminiPermissionMode(permissionMode);
     const resolvedModel = await providerModelsService.resolveResumeModel(
         'gemini',
         sessionId,
@@ -258,11 +271,11 @@ async function spawnGemini(command, options = {}, ws) {
     args.push('--output-format', 'stream-json');
 
     // Handle approval modes and allowed tools
-    if (settings.skipPermissions || options.skipPermissions || permissionMode === 'yolo') {
+    if (settings.skipPermissions || options.skipPermissions || resolvedPermissionMode === 'yolo') {
         args.push('--yolo');
-    } else if (permissionMode === 'auto_edit') {
+    } else if (resolvedPermissionMode === 'auto_edit') {
         args.push('--approval-mode', 'auto_edit');
-    } else if (permissionMode === 'plan') {
+    } else if (resolvedPermissionMode === 'plan') {
         args.push('--approval-mode', 'plan');
     }
 

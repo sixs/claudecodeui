@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../../../utils/api';
+import { AGENT_PERMISSION_SETTINGS_CHANGED_EVENT } from '../../../constants/appEvents';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type {
   ProjectSession,
@@ -34,11 +35,45 @@ const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'gemini', 'openco
  */
 const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   claude: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
-  cursor: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+  cursor: ['default', 'bypassPermissions'],
   codex: ['default', 'acceptEdits', 'bypassPermissions'],
-  gemini: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+  gemini: ['default', 'auto_edit', 'yolo', 'plan'],
   opencode: ['default'],
 };
+
+const PROVIDER_PERMISSION_SETTINGS_KEYS: Partial<Record<LLMProvider, string>> = {
+  codex: 'codex-settings',
+  gemini: 'gemini-settings',
+};
+
+function readStoredPermissionMode(storageKey: string): PermissionMode | null {
+  try {
+    const rawValue = localStorage.getItem(storageKey);
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue) as { permissionMode?: unknown };
+    return typeof parsedValue.permissionMode === 'string'
+      ? parsedValue.permissionMode as PermissionMode
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveProviderSettingsPermissionMode(
+  targetProvider: LLMProvider,
+  validModes: PermissionMode[],
+): PermissionMode | null {
+  const storageKey = PROVIDER_PERMISSION_SETTINGS_KEYS[targetProvider];
+  if (!storageKey) {
+    return null;
+  }
+
+  const storedMode = readStoredPermissionMode(storageKey);
+  return storedMode && validModes.includes(storedMode) ? storedMode : 'default';
+}
 
 type ProviderCapabilities = {
   provider: LLMProvider;
@@ -61,6 +96,7 @@ type ProviderCapabilitiesApiResponse = {
 interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
   selectedProject: Project | null;
+  isActive?: boolean;
 }
 
 type ProviderModelsApiResponse = {
@@ -82,11 +118,12 @@ type ChangeActiveModelApiResponse = {
   };
 };
 
-export function useChatProviderState({ selectedSession, selectedProject: _selectedProject }: UseChatProviderStateArgs) {
+export function useChatProviderState({ selectedSession, selectedProject: _selectedProject, isActive = true }: UseChatProviderStateArgs) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [permissionSettingsVersion, setPermissionSettingsVersion] = useState(0);
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
   const [provider, setProvider] = useState<LLMProvider>(() => {
-    return (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
+    return selectedSession?.__provider || (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
   });
   const [cursorModel, setCursorModel] = useState<string>(() => {
     return localStorage.getItem('cursor-model') || FALLBACK_DEFAULT_MODEL.cursor;
@@ -268,8 +305,38 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     return FALLBACK_PERMISSION_MODES[targetProvider] ?? ['default'];
   }, [providerCapabilities]);
 
+  useEffect(() => {
+    const handlePermissionSettingsChanged = (event: Event) => {
+      if (event instanceof StorageEvent) {
+        const key = event.key ?? '';
+        if (
+          key !== 'codex-settings'
+          && key !== 'gemini-settings'
+          && !key.startsWith('permissionMode-')
+        ) {
+          return;
+        }
+      }
+
+      setPermissionSettingsVersion((version) => version + 1);
+    };
+
+    window.addEventListener(AGENT_PERMISSION_SETTINGS_CHANGED_EVENT, handlePermissionSettingsChanged);
+    window.addEventListener('storage', handlePermissionSettingsChanged);
+
+    return () => {
+      window.removeEventListener(AGENT_PERMISSION_SETTINGS_CHANGED_EVENT, handlePermissionSettingsChanged);
+      window.removeEventListener('storage', handlePermissionSettingsChanged);
+    };
+  }, []);
+
   const getDefaultPermissionModeForProvider = useCallback((targetProvider: LLMProvider): PermissionMode => {
     const modes = getPermissionModesForProvider(targetProvider);
+    const settingsMode = resolveProviderSettingsPermissionMode(targetProvider, modes);
+    if (settingsMode) {
+      return settingsMode;
+    }
+
     const capabilityDefault = providerCapabilities?.[targetProvider]?.defaultPermissionMode as PermissionMode | undefined;
     if (capabilityDefault && modes.includes(capabilityDefault)) {
       return capabilityDefault;
@@ -451,27 +518,37 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   }, [providerEfforts, providerModels, reconcileStoredEffort]);
 
   useEffect(() => {
-    if (!selectedSession?.id) {
-      return;
-    }
-
-    const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`) as PermissionMode | null;
     const validModes = getPermissionModesForProvider(provider);
+    const savedMode = selectedSession?.id
+      ? localStorage.getItem(`permissionMode-${selectedSession.id}`) as PermissionMode | null
+      : null;
+
     setPermissionMode(
       savedMode && validModes.includes(savedMode)
         ? savedMode
         : getDefaultPermissionModeForProvider(provider),
     );
-  }, [selectedSession?.id, provider, getDefaultPermissionModeForProvider, getPermissionModesForProvider]);
+  }, [
+    selectedSession?.id,
+    provider,
+    getDefaultPermissionModeForProvider,
+    getPermissionModesForProvider,
+    permissionSettingsVersion,
+  ]);
 
   useEffect(() => {
-    if (!selectedSession?.__provider || selectedSession.__provider === provider) {
+    if (!selectedSession?.__provider) {
       return;
     }
 
-    setProvider(selectedSession.__provider);
-    localStorage.setItem('selected-provider', selectedSession.__provider);
-  }, [provider, selectedSession]);
+    if (selectedSession.__provider !== provider) {
+      setProvider(selectedSession.__provider);
+    }
+
+    if (isActive) {
+      localStorage.setItem('selected-provider', selectedSession.__provider);
+    }
+  }, [isActive, provider, selectedSession?.__provider]);
 
   // Permission prompts belong to a session, not to the transient provider
   // selection that is synchronized after navigation.

@@ -5,11 +5,96 @@ import type { Terminal } from '@xterm/xterm';
 
 import type { Project, ProjectSession } from '../../../types/app';
 import { TERMINAL_INIT_DELAY_MS } from '../constants/constants';
+import type { ShellToolsSettings } from '../types/types';
 import { getShellWebSocketUrl, parseShellMessage, sendSocketMessage } from '../utils/socket';
 
 const ANSI_ESCAPE_REGEX =
   /(?:\u001B\[[0-?]*[ -/]*[@-~]|\u009B[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u009D[^\u0007\u009C]*(?:\u0007|\u009C)|\u001B[PX^_][^\u001B]*\u001B\\|[\u0090\u0098\u009E\u009F][^\u009C]*\u009C|\u001B[@-Z\\-_])/g;
 const PROCESS_EXIT_REGEX = /Process exited with code (\d+)/;
+const PROVIDER_PERMISSION_SETTINGS_KEYS: Record<string, string> = {
+  codex: 'codex-settings',
+  gemini: 'gemini-settings',
+};
+const PROVIDER_TOOLS_SETTINGS_KEYS: Record<string, string> = {
+  claude: 'claude-settings',
+  cursor: 'cursor-tools-settings',
+};
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const items = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return items.length > 0 ? items : undefined;
+}
+
+function readJsonObject(storageKey: string): Record<string, unknown> | null {
+  try {
+    const rawSettings = localStorage.getItem(storageKey);
+    if (!rawSettings) {
+      return null;
+    }
+
+    const settings = JSON.parse(rawSettings) as unknown;
+    return settings && typeof settings === 'object' && !Array.isArray(settings)
+      ? settings as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readProviderPermissionMode(provider: string, sessionId?: string | null): string | undefined {
+  if (sessionId) {
+    try {
+      const sessionPermissionMode = localStorage.getItem(`permissionMode-${sessionId}`);
+      if (sessionPermissionMode) {
+        return sessionPermissionMode;
+      }
+    } catch {
+      // Fall through to provider defaults.
+    }
+  }
+
+  const settingsKey = PROVIDER_PERMISSION_SETTINGS_KEYS[provider];
+  if (!settingsKey) {
+    return undefined;
+  }
+
+  const settings = readJsonObject(settingsKey);
+  return typeof settings?.permissionMode === 'string' ? settings.permissionMode : undefined;
+}
+
+function readProviderToolsSettings(provider: string): ShellToolsSettings | undefined {
+  const settingsKey = PROVIDER_TOOLS_SETTINGS_KEYS[provider];
+  if (!settingsKey) {
+    return undefined;
+  }
+
+  const settings = readJsonObject(settingsKey);
+  if (!settings) {
+    return undefined;
+  }
+
+  const toolsSettings: ShellToolsSettings = {
+    allowedTools: readStringArray(settings.allowedTools),
+    disallowedTools: readStringArray(settings.disallowedTools),
+    allowedCommands: readStringArray(settings.allowedCommands),
+    disallowedCommands: readStringArray(settings.disallowedCommands),
+    skipPermissions: settings.skipPermissions === true,
+  };
+
+  return Object.values(toolsSettings).some((value) => (
+    Array.isArray(value) ? value.length > 0 : value === true
+  ))
+    ? toolsSettings
+    : undefined;
+}
 
 type UseShellConnectionOptions = {
   wsRef: MutableRefObject<WebSocket | null>;
@@ -138,17 +223,24 @@ export function useShellConnection({
             const forceRestart = forceRestartOnInitRef.current;
             forceRestartOnInitRef.current = false;
 
+            const provider = isPlainShellRef.current
+              ? 'plain-shell'
+              : (selectedSessionRef.current?.__provider || localStorage.getItem('selected-provider') || 'claude');
+            const sessionId = isPlainShellRef.current ? null : selectedSessionRef.current?.id || null;
+
             sendSocketMessage(socket, {
               type: 'init',
               projectPath: currentProject.fullPath || currentProject.path || '',
-              sessionId: isPlainShellRef.current ? null : selectedSessionRef.current?.id || null,
+              sessionId,
               hasSession: isPlainShellRef.current ? false : Boolean(selectedSessionRef.current),
-              provider: isPlainShellRef.current ? 'plain-shell' : (selectedSessionRef.current?.__provider || localStorage.getItem('selected-provider') || 'claude'),
+              provider,
               cols: currentTerminal.cols,
               rows: currentTerminal.rows,
               initialCommand: initialCommandRef.current,
               isPlainShell: isPlainShellRef.current,
               forceRestart,
+              permissionMode: readProviderPermissionMode(provider, sessionId),
+              toolsSettings: readProviderToolsSettings(provider),
             });
           }, TERMINAL_INIT_DELAY_MS);
         };

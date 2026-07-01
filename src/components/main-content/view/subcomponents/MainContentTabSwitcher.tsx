@@ -6,6 +6,7 @@ import { Tooltip, PillBar, Pill } from '../../../../shared/view/ui';
 import type { AppTab } from '../../../../types/app';
 import { usePlugins } from '../../../../contexts/PluginsContext';
 import PluginIcon from '../../../plugins/view/PluginIcon';
+import { shouldOpenPluginInDrawer } from '../../../plugins/utils/pluginPresentation';
 
 type MainContentTabSwitcherProps = {
   activeTab: AppTab;
@@ -68,7 +69,7 @@ export default function MainContentTabSwitcher({
   ];
 
   const pluginTabs: PluginTab[] = plugins
-    .filter((p) => p.enabled)
+    .filter((p) => p.enabled && !shouldOpenPluginInDrawer(p.name))
     .map((p) => ({
       kind: 'plugin',
       id: `plugin:${p.name}` as AppTab,

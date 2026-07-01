@@ -28,7 +28,7 @@ function isWorkspaceTrustPrompt(text = '') {
 
 async function spawnCursor(command, options = {}, ws) {
   return new Promise(async (resolve, reject) => {
-    const { sessionId, projectPath, cwd, resume, toolsSettings, skipPermissions, model, sessionSummary } = options;
+    const { sessionId, projectPath, cwd, resume, toolsSettings, skipPermissions, permissionMode, model, sessionSummary } = options;
     const resolvedModel = await providerModelsService.resolveResumeModel('cursor', sessionId, model);
     let capturedSessionId = sessionId; // Track session ID throughout the process
     let sessionCreatedSent = false; // Track if we've already sent session-created event
@@ -69,7 +69,7 @@ async function spawnCursor(command, options = {}, ws) {
     }
 
     // Add skip permissions flag if enabled
-    if (skipPermissions || settings.skipPermissions) {
+    if (skipPermissions || settings.skipPermissions || permissionMode === 'bypassPermissions') {
       baseArgs.push('-f');
       console.log('Using -f flag (skip permissions)');
     }

@@ -164,6 +164,30 @@ export default function ChatComposer({
   sendByCtrlEnter,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
+  const permissionModeTone =
+    permissionMode === 'default'
+      ? 'default'
+      : permissionMode === 'acceptEdits' || permissionMode === 'auto_edit'
+        ? 'edit'
+        : permissionMode === 'auto'
+          ? 'auto'
+          : permissionMode === 'bypassPermissions' || permissionMode === 'yolo'
+            ? 'bypass'
+            : 'plan';
+  const permissionModeLabel =
+    permissionMode === 'default'
+      ? t('codex.modes.default')
+      : permissionMode === 'acceptEdits'
+        ? t('codex.modes.acceptEdits')
+        : permissionMode === 'auto_edit'
+          ? t('gemini.shortModes.autoEdit', { defaultValue: 'Auto Edit' })
+          : permissionMode === 'auto'
+            ? t('codex.modes.auto')
+            : permissionMode === 'bypassPermissions'
+              ? t('codex.modes.bypassPermissions')
+              : permissionMode === 'yolo'
+                ? t('gemini.shortModes.yolo', { defaultValue: 'YOLO' })
+                : t('codex.modes.plan');
   const commandMenuPosition = useMemo(() => {
     if (!isCommandMenuOpen) {
       return { top: 0, left: 16, bottom: 90 };
@@ -408,13 +432,13 @@ export default function ChatComposer({
               type="button"
               onClick={onModeSwitch}
               className={`inline-flex h-8 items-center rounded-lg border px-2 text-xs font-medium transition-all duration-200 sm:px-2.5 ${
-                permissionMode === 'default'
+                permissionModeTone === 'default'
                   ? 'border-border/60 bg-muted/50 text-muted-foreground hover:bg-muted'
-                  : permissionMode === 'acceptEdits'
+                  : permissionModeTone === 'edit'
                     ? 'border-green-300/60 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-600/40 dark:bg-green-900/15 dark:text-green-300 dark:hover:bg-green-900/25'
-                    : permissionMode === 'auto'
+                    : permissionModeTone === 'auto'
                       ? 'border-blue-300/60 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-600/40 dark:bg-blue-900/15 dark:text-blue-300 dark:hover:bg-blue-900/25'
-                      : permissionMode === 'bypassPermissions'
+                      : permissionModeTone === 'bypass'
                         ? 'border-orange-300/60 bg-orange-50 text-orange-700 hover:bg-orange-100 dark:border-orange-600/40 dark:bg-orange-900/15 dark:text-orange-300 dark:hover:bg-orange-900/25'
                         : 'border-primary/20 bg-primary/5 text-primary hover:bg-primary/10'
               }`}
@@ -423,23 +447,19 @@ export default function ChatComposer({
               <div className="flex items-center gap-1.5">
                 <div
                   className={`h-2.5 w-2.5 rounded-full sm:h-1.5 sm:w-1.5 ${
-                    permissionMode === 'default'
+                    permissionModeTone === 'default'
                       ? 'bg-muted-foreground'
-                      : permissionMode === 'acceptEdits'
+                      : permissionModeTone === 'edit'
                         ? 'bg-green-500'
-                        : permissionMode === 'auto'
+                        : permissionModeTone === 'auto'
                           ? 'bg-blue-500'
-                          : permissionMode === 'bypassPermissions'
+                          : permissionModeTone === 'bypass'
                             ? 'bg-orange-500'
                             : 'bg-primary'
                   }`}
                 />
                 <span className="hidden whitespace-nowrap sm:inline">
-                  {permissionMode === 'default' && t('codex.modes.default')}
-                  {permissionMode === 'acceptEdits' && t('codex.modes.acceptEdits')}
-                  {permissionMode === 'auto' && t('codex.modes.auto')}
-                  {permissionMode === 'bypassPermissions' && t('codex.modes.bypassPermissions')}
-                  {permissionMode === 'plan' && t('codex.modes.plan')}
+                  {permissionModeLabel}
                 </span>
               </div>
             </button>

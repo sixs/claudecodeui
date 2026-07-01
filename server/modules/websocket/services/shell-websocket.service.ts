@@ -19,6 +19,16 @@ type ShellIncomingMessage = {
   initialCommand?: string;
   isPlainShell?: boolean;
   forceRestart?: boolean;
+  permissionMode?: string;
+  toolsSettings?: unknown;
+};
+
+type ShellToolsSettings = {
+  allowedTools: string[];
+  disallowedTools: string[];
+  allowedCommands: string[];
+  disallowedCommands: string[];
+  skipPermissions: boolean;
 };
 
 type PtySessionEntry = {
@@ -66,6 +76,38 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function readToolsSettings(value: unknown): ShellToolsSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      allowedTools: [],
+      disallowedTools: [],
+      allowedCommands: [],
+      disallowedCommands: [],
+      skipPermissions: false,
+    };
+  }
+
+  const settings = value as Record<string, unknown>;
+  return {
+    allowedTools: readStringArray(settings.allowedTools),
+    disallowedTools: readStringArray(settings.disallowedTools),
+    allowedCommands: readStringArray(settings.allowedCommands),
+    disallowedCommands: readStringArray(settings.disallowedCommands),
+    skipPermissions: settings.skipPermissions === true,
+  };
+}
+
 /**
  * Parses incoming websocket shell messages and keeps processing safe when
  * malformed payloads are received.
@@ -109,16 +151,138 @@ function resolveResumeSessionId(
   return resolvedSessionId;
 }
 
+function getCodexPermissionCliArgs(permissionMode: string): string[] {
+  switch (permissionMode) {
+    case 'acceptEdits':
+      return ['--sandbox', 'workspace-write', '--ask-for-approval', 'never'];
+    case 'bypassPermissions':
+      return ['--dangerously-bypass-approvals-and-sandbox'];
+    case 'default':
+      return ['--sandbox', 'workspace-write', '--ask-for-approval', 'untrusted'];
+    default:
+      return [];
+  }
+}
+
+function quoteShellArg(value: string): string {
+  if (os.platform() === 'win32') {
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function formatShellArg(value: string): string {
+  return /^[a-zA-Z0-9_./:=@%+-]+$/.test(value) ? value : quoteShellArg(value);
+}
+
+function joinCliCommand(executable: string, args: string[] = []): string {
+  return [executable, ...args.map(formatShellArg)].join(' ');
+}
+
+function normalizeGeminiPermissionMode(permissionMode: string): string {
+  if (permissionMode === 'bypassPermissions') {
+    return 'yolo';
+  }
+
+  if (permissionMode === 'acceptEdits') {
+    return 'auto_edit';
+  }
+
+  return permissionMode;
+}
+
+function normalizeClaudePermissionMode(permissionMode: string): string {
+  return permissionMode === 'yolo' ? 'bypassPermissions' : permissionMode;
+}
+
+function buildCodexCliCommand(permissionMode: string, resumeSessionId = ''): string {
+  const args = getCodexPermissionCliArgs(permissionMode);
+  const baseCommand = joinCliCommand('codex', args);
+
+  if (!resumeSessionId) {
+    return baseCommand;
+  }
+
+  return `${baseCommand} resume ${formatShellArg(resumeSessionId)}`;
+}
+
+function buildClaudeCliCommand(
+  permissionMode: string,
+  toolsSettings: ShellToolsSettings,
+  resumeSessionId = ''
+): string {
+  const args: string[] = [];
+  const normalizedPermissionMode = normalizeClaudePermissionMode(permissionMode);
+
+  if (normalizedPermissionMode && normalizedPermissionMode !== 'default') {
+    args.push('--permission-mode', normalizedPermissionMode);
+  } else if (toolsSettings.skipPermissions) {
+    args.push('--permission-mode', 'bypassPermissions');
+  }
+
+  if (toolsSettings.allowedTools.length > 0) {
+    args.push('--allowed-tools', toolsSettings.allowedTools.join(','));
+  }
+
+  if (toolsSettings.disallowedTools.length > 0) {
+    args.push('--disallowed-tools', toolsSettings.disallowedTools.join(','));
+  }
+
+  if (resumeSessionId) {
+    args.push('--resume', resumeSessionId);
+  }
+
+  return joinCliCommand('claude', args);
+}
+
+function buildCursorCliCommand(
+  permissionMode: string,
+  toolsSettings: ShellToolsSettings,
+  resumeSessionId = ''
+): string {
+  const args: string[] = [];
+
+  if (resumeSessionId) {
+    args.push(`--resume=${resumeSessionId}`);
+  }
+
+  if (toolsSettings.skipPermissions || permissionMode === 'bypassPermissions') {
+    args.push('-f');
+  }
+
+  return joinCliCommand('cursor-agent', args);
+}
+
+function buildGeminiCliCommand(permissionMode: string, resumeSessionId = ''): string {
+  const args: string[] = [];
+  const normalizedPermissionMode = normalizeGeminiPermissionMode(permissionMode);
+
+  if (normalizedPermissionMode === 'yolo') {
+    args.push('--yolo');
+  } else if (normalizedPermissionMode === 'auto_edit' || normalizedPermissionMode === 'plan') {
+    args.push('--approval-mode', normalizedPermissionMode);
+  }
+
+  if (resumeSessionId) {
+    args.push('--resume', resumeSessionId);
+  }
+
+  return joinCliCommand('gemini', args);
+}
+
 /**
  * Resolves provider command line for plain shell and agent-backed shell modes.
  */
-function buildShellCommand(
+export function buildShellCommand(
   message: ShellIncomingMessage,
   dependencies: ShellWebSocketDependencies
 ): string {
   const hasSession = readBoolean(message.hasSession);
   const initialCommand = readString(message.initialCommand);
   const provider = readString(message.provider, 'claude');
+  const permissionMode = readString(message.permissionMode);
+  const toolsSettings = readToolsSettings(message.toolsSettings);
   const resumeSessionId = resolveResumeSessionId(message, dependencies);
   const isPlainShell =
     readBoolean(message.isPlainShell) ||
@@ -130,28 +294,26 @@ function buildShellCommand(
   }
 
   if (provider === 'cursor') {
-    if (resumeSessionId) {
-      return `cursor-agent --resume="${resumeSessionId}"`;
-    }
-    return 'cursor-agent';
+    return buildCursorCliCommand(permissionMode, toolsSettings, resumeSessionId);
   }
 
   if (provider === 'codex') {
+    const command = buildCodexCliCommand(permissionMode, resumeSessionId);
+    const fallbackCommand = buildCodexCliCommand(permissionMode);
     if (resumeSessionId) {
       if (os.platform() === 'win32') {
-        return `codex resume "${resumeSessionId}"; if ($LASTEXITCODE -ne 0) { codex }`;
+        return `${command}; if ($LASTEXITCODE -ne 0) { ${fallbackCommand} }`;
       }
-      return `codex resume "${resumeSessionId}" || codex`;
+      return `${command} || ${fallbackCommand}`;
     }
-    return 'codex';
+    return command;
   }
 
   if (provider === 'gemini') {
-    const command = initialCommand || 'gemini';
-    if (resumeSessionId) {
-      return `${command} --resume "${resumeSessionId}"`;
+    if (initialCommand && !resumeSessionId) {
+      return initialCommand;
     }
-    return command;
+    return buildGeminiCliCommand(permissionMode, resumeSessionId);
   }
 
   if (provider === 'opencode') {
@@ -161,12 +323,17 @@ function buildShellCommand(
     return initialCommand || 'opencode';
   }
 
-  const command = initialCommand || 'claude';
+  if (initialCommand && !resumeSessionId) {
+    return initialCommand;
+  }
+
+  const command = buildClaudeCliCommand(permissionMode, toolsSettings, resumeSessionId);
+  const fallbackCommand = buildClaudeCliCommand(permissionMode, toolsSettings);
   if (resumeSessionId) {
     if (os.platform() === 'win32') {
-      return `claude --resume "${resumeSessionId}"; if ($LASTEXITCODE -ne 0) { claude }`;
+      return `${command}; if ($LASTEXITCODE -ne 0) { ${fallbackCommand} }`;
     }
-    return `claude --resume "${resumeSessionId}" || claude`;
+    return `${command} || ${fallbackCommand}`;
   }
   return command;
 }
