@@ -1,7 +1,9 @@
 // Service Worker for CloudCLI PWA
-// Cache only manifest (needed for PWA install). HTML and JS are never pre-cached
-// so a rebuild + refresh always picks up the latest assets.
-const CACHE_NAME = 'claude-ui-v2';
+// 导航(HTML) 用 stale-while-revalidate：优先秒开缓存，后台再拉最新 HTML 更新，
+// 避免 WebView 后台恢复时整页重新加载造成白屏/刷新感。
+// /assets/ 哈希资源仍 cache-first；rebuild 后由后台更新 + 下次加载拿到新版本。
+const CACHE_NAME = 'claude-ui-v3';
+const APP_SHELL_KEY = '__app_shell_html__';
 const urlsToCache = [
   '/manifest.json'
 ];
@@ -24,15 +26,34 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Navigation requests (HTML) — always go to network, no caching
+  // Navigation requests (HTML) — stale-while-revalidate
   if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match('/manifest.json').then(() =>
-        new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
-          headers: { 'Content-Type': 'text/html' }
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match(APP_SHELL_KEY);
+      // 后台更新：从网络拉最新 HTML 并写回缓存（不阻塞当前请求）
+      const networkUpdate = fetch(event.request)
+        .then(response => {
+          if (response && response.ok && response.type === 'basic') {
+            cache.put(APP_SHELL_KEY, response.clone());
+          }
+          return response;
         })
-      ))
-    );
+        .catch(() => null);
+      // 有缓存：立即秒开，后台静默更新
+      if (cached) {
+        return cached;
+      }
+      // 无缓存（首次/清缓存后）：等网络
+      const netResp = await networkUpdate;
+      if (netResp) {
+        return netResp;
+      }
+      // 离线兜底
+      return new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
+        headers: { 'Content-Type': 'text/html' }
+      });
+    })());
     return;
   }
 
